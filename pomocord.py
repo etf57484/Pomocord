@@ -85,6 +85,18 @@ class ActivePomodoro:
         conn = DBConnection(sql,params)
         return conn.execute().fetchone()
 
+    def add(self):
+        sql = "INSERT INTO `tasks`(`task_id`,`task_name`,`start`,`end`) VALUES(%(task_id)s,%(task_name)s,%(start)s,%(end)s)"
+        params = {
+            'task_id': self.task_id,
+            'task_name': self.task_name,
+            'start': datetime.datetime.now(),
+            'end': datetime.datetime.now() + datetime.timedelta(minutes=self.work_time)
+        }
+        conn = DBConnection(sql,params)
+        conn.execute()
+        del conn
+
     def achieved(self):
         sql = "UPDATE `tasks` SET `achieved`=1 WHERE `pomodoro_id`=%(pomodoro_id)s"
         params = {
@@ -216,6 +228,13 @@ async def loop():
             task.achieved()
 
             interval_end = datetime.datetime.now() + datetime.timedelta(minutes=os.environ['INTERVAL_TIME'])
+
+        if datetime.datetime.strptime(task.end, '%Y-%m-%d %H:%M') == datetime.datetime.strptime(interval_end, '%Y-%m-%d %H:%M'):
+            await channel.send(f'休憩終了！作業に戻りましょう！')
+            task.add()
+            pomodoro_count = task.get_total_pomodoro()
+            pomodoro_emoji = for i in range(pomodoro_count)
+            await channel.send(f'[{task.task_name}]\n{pomodoro_count}個目のポモドーロです{pomodoro_emoji}')
 
     print(os.environ['CHANNEL_ID'])
     channel = client.get_channel(int(os.environ['CHANNEL_ID']))
