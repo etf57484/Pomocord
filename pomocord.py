@@ -54,6 +54,7 @@ class DBConnection:
             self.insert()
 
 active_task = None
+interval_end = None
 
 bot = discord.Bot()
 client = discord.Client()
@@ -75,6 +76,24 @@ class ActivePomodoro:
         self.task_name = result[2]
         self.start = result[3]
         self.end = result[4]
+
+    def get_total_pomodoro(self):
+        sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `task_id`=%(task_id)s "
+        params = {
+            'task_id':self.task_id
+        }
+        conn = DBConnection(sql,params)
+        return conn.execute().fetchone()
+
+    def achieved(self):
+        sql = "UPDATE `tasks` SET `achieved`=1 WHERE `pomodoro_id`=%(pomodoro_id)s"
+        params = {
+            'pomodoro_id': self.pomodoro_id[0]
+        }
+        conn = DBConnection(sql,params)
+        conn.execute()
+        del conn
+
 
 
 class NewTask:
@@ -186,13 +205,17 @@ async def loop():
     # botが起動するまで待つ
     await client.wait_until_ready()
 
-    global active_task
+    global active_task, interval_end
     if active_task is not None:
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
 
         task = ActivePomodoro(task_id=active_task)
         if datetime.datetime.strptime(task.end, '%Y-%m-%d %H:%M') == now:
-            
+            pomodoro_count = task.get_total_pomodoro()
+            await channel.send(f'{pomodoro_count}個目のポモドーロが終わりました！休憩しましょう！')
+            task.achieved()
+
+            interval_end = datetime.datetime.now() + datetime.timedelta(minutes=os.environ['INTERVAL_TIME'])
 
     print(os.environ['CHANNEL_ID'])
     channel = client.get_channel(int(os.environ['CHANNEL_ID']))
