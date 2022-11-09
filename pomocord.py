@@ -57,7 +57,6 @@ active_task = None
 interval_end = None
 
 bot = discord.Bot()
-client = discord.Client()
 '''
 CREATE TABLE `tasks` (pomodoro_id int auto_increment, task_id varchar(36), task_name varchar(50), start datetime, end datetime, achieved BOOLEAN DEFAULT False, INDEX(pomodoro_id));
 '''
@@ -77,13 +76,18 @@ class ActivePomodoro:
         self.start = result[3]
         self.end = result[4]
 
+        self.work_time = int(os.environ['WORK_TIME'])
+        self.interval_time = int(os.environ['INTERVAL_TIME']
+)
+
     def get_total_pomodoro(self):
         sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `task_id`=%(task_id)s "
         params = {
             'task_id':self.task_id
         }
         conn = DBConnection(sql,params)
-        return conn.execute().fetchone()
+        result = conn.execute().fetchone()
+        return result[0]
 
     def add(self):
         sql = "INSERT INTO `tasks`(`task_id`,`task_name`,`start`,`end`) VALUES(%(task_id)s,%(task_name)s,%(start)s,%(end)s)"
@@ -100,71 +104,51 @@ class ActivePomodoro:
     def achieved(self):
         sql = "UPDATE `tasks` SET `achieved`=1 WHERE `pomodoro_id`=%(pomodoro_id)s"
         params = {
-            'pomodoro_id': self.pomodoro_id[0]
+            'pomodoro_id': self.pomodoro_id
         }
         conn = DBConnection(sql,params)
         conn.execute()
         del conn
-
-
 
 class NewTask:
     def __init__(self,task_name):
         self.task_name = task_name
         self.task_id = str(uuid.uuid4())
-        self.pomodoro_id = []
 
-        self.work_time = os.environ['WORK_TIME']
-        self.interval_time = os.environ['INTERVAL_TIME']
+        self.work_time = int(os.environ['WORK_TIME'])
+        self.interval_time = int(os.environ['INTERVAL_TIME'])
+        self.start = datetime.datetime.now()
+        self.end = datetime.datetime.now() + datetime.timedelta(minutes=int(self.work_time))
         
-    def add(self):
         global active_task
-        # if active_task is not None:
-        #     return False
         sql = "INSERT INTO `tasks`(`task_id`,`task_name`,`start`,`end`) VALUES(%(task_id)s,%(task_name)s,%(start)s,%(end)s)"
         params = {
             'task_id': self.task_id,
             'task_name': self.task_name,
-            'start': datetime.datetime.now(),
-            'end': datetime.datetime.now() + datetime.timedelta(minutes=self.work_time)
+            'start': self.start,
+            'end': self.end
         }
         conn = DBConnection(sql,params)
         conn.execute()
-        del conn
-
-        sql = "SELECT `pomodoro_id` FROM `tasks` WHERE `task_id`=%(task_id)s ORDER BY `pomodoro_id` DESC LIMIT 1"
-        params = {
-            'task_id': self.task_id,
-        }
-
-        conn = DBConnection(sql,params)
-        result = conn.execute().fetchone()
-        self.pomodoro_id.insert(0,result[0])
-        print(result)
         del conn
 
         active_task = self.task_id
 
-    def get_end(self):
-        sql = "SELECT `end` FROM `tasks` "
+class PomodoroManagement:
+    def __init__(self):
+        sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `achieved`=1"
+        conn = DBConnection(sql,{})
+        result = conn.execute()
+        self.count_all_pomodoro = result[0]
 
-    def achieved(self):
-        sql = "UPDATE `tasks` SET `end`=%(end)s WHERE `pomodoro_id`=%(pomodoro_id)s"
+        sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `achieved`=1 and `start` LIKE %(today)s"
         params = {
-            'end': datetime.datetime.now(),
-            'pomodoro_id': self.pomodoro_id[0]
+            'today': str(datetime.datetime.today().strftime('%Y-%m-%d'))+"%"
         }
         conn = DBConnection(sql,params)
-        conn.execute()
-        del conn
+        result = conn.execute()
+        self.count_today_pomodoro = result[0]
 
-    def get_total_pomodoro(self):
-        sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `task_id`=%(task_id)s "
-        params = {
-            'task_id':self.task_id
-        }
-        conn = DBConnection(sql,params)
-        return conn.execute().fetchone()
 
 @bot.slash_command(name="start", description="タスクを開始します")
 async def start(ctx, task_name: Option(str, required=True, description="タスク名を入力してください")):
@@ -175,24 +159,9 @@ async def start(ctx, task_name: Option(str, required=True, description="タス�
     await ctx.respond(f'[{task_name}]を開始します')
 
     global active_task
-    pomodoro_time = 0
-    pomodoro_emoji = ''
+    active_task = new_task.task_id
 
-    while True:
-        print(f'active_task:{active_task}')
-        # if active_task is None:
-        #     break
-        pomodoro_time += 1
-        pomodoro_emoji = pomodoro_emoji + '🍅'
-        await ctx.respond(f'[{new_task.task_name}]\n{pomodoro_time}個目のポモドーロです{pomodoro_emoji}')
-        new_task.add()
-        time.sleep(int(os.environ['WORK_TIME']))
-        
-        if active_task is None:
-            break
-        await ctx.respond(f'{pomodoro_time}個目のポモドーロが終わりました！休憩しましょう！')
-        new_task.achieved()
-        time.sleep(int(os.environ['INTERVAL_TIME']))
+    await ctx.respond(f'[{new_task.task_name}]\n1個目のポモドーロです🍅\n🕐終了時刻:{new_task.end}')
 
 
 @bot.slash_command(name="finish", description="タスクを完了します")
@@ -201,45 +170,45 @@ async def finish(ctx):
     if active_task is None:
         await ctx.respond(f'現在実行中のタスクはありません😥')
     else:
-        finished_task = NewTask(task_id=active_task)
+        finished_task = ActivePomodoro(task_id=active_task)
         finished_task.achieved()
 
-        await ctx.respond(f'[{task_name}]を完了させました！お疲れ様です！')
-        total_pomodoro = finished_task.get_total_pomodoro()
-        total_pomodoro_emoji = ''
-        for i in range(total_pomodoro):
-            total_pomodoro_emoji += '🍅'
-        await ctx.respond(f'獲得ポモドーロ：{total_pomodoro} {total_pomodoro_emoji}')
+        await ctx.respond(f'[{finished_task.task_name}]を完了させました！お疲れ様です！')
         del finished_task
+        active_task = None
+        interval_end = None
 
-@tasks.loop(seconds=60)
+@bot.slash_command(name="result", description="ポモドーロの獲得状況を確認します")
+async def result(ctx):
+    result = PomodoroManagement()
+    await ctx.respond(f'**🍅ポモドーロ獲得状況🍅**\n総獲得数:{result.count_all_pomodoro}\n今日の獲得数:{result.count_today_pomodoro}')
+
+@tasks.loop(seconds=10)
 async def loop():
     # botが起動するまで待つ
-    await client.wait_until_ready()
+    await bot.wait_until_ready()
+    channel = bot.get_channel(int(os.environ['CHANNEL_ID']))
 
     global active_task, interval_end
+    print(f'active_task:{active_task}')
     if active_task is not None:
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
 
         task = ActivePomodoro(task_id=active_task)
-        if datetime.datetime.strptime(task.end, '%Y-%m-%d %H:%M') == now:
+        if task.end.strftime('%Y-%m-%d %H:%M') == now:
             pomodoro_count = task.get_total_pomodoro()
             await channel.send(f'{pomodoro_count}個目のポモドーロが終わりました！休憩しましょう！')
             task.achieved()
 
-            interval_end = datetime.datetime.now() + datetime.timedelta(minutes=os.environ['INTERVAL_TIME'])
-
-        if datetime.datetime.strptime(task.end, '%Y-%m-%d %H:%M') == datetime.datetime.strptime(interval_end, '%Y-%m-%d %H:%M'):
-            await channel.send(f'休憩終了！作業に戻りましょう！')
-            task.add()
-            pomodoro_count = task.get_total_pomodoro()
-            pomodoro_emoji = for i in range(pomodoro_count)
-            await channel.send(f'[{task.task_name}]\n{pomodoro_count}個目のポモドーロです{pomodoro_emoji}')
-
-    print(os.environ['CHANNEL_ID'])
-    channel = client.get_channel(int(os.environ['CHANNEL_ID']))
-    await channel.send('時間だよ')  
+            interval_end = datetime.datetime.now() + datetime.timedelta(minutes=int(os.environ['INTERVAL_TIME']))
+        if interval_end is not None:
+            if interval_end.strftime('%Y-%m-%d %H:%M') == now:
+                await channel.send(f'休憩終了！作業に戻りましょう！')
+                task.add()
+                pomodoro_count = task.get_total_pomodoro()
+                pomodoro_emoji = '🍅' * pomodoro_count
+                await channel.send(f'[{task.task_name}]\n{pomodoro_count}個目のポモドーロです{pomodoro_emoji}')
+                interval_end = None
 
 loop.start()
-# bot.run(os.environ['API_KEY'])
-client.run(os.environ['API_KEY'])
+bot.run(os.environ['API_KEY'])
