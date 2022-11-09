@@ -77,8 +77,7 @@ class ActivePomodoro:
         self.end = result[4]
 
         self.work_time = int(os.environ['WORK_TIME'])
-        self.interval_time = int(os.environ['INTERVAL_TIME']
-)
+        self.interval_time = int(os.environ['INTERVAL_TIME'])
 
     def get_total_pomodoro(self):
         sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `task_id`=%(task_id)s "
@@ -138,7 +137,7 @@ class PomodoroManagement:
     def __init__(self):
         sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `achieved`=1"
         conn = DBConnection(sql,{})
-        result = conn.execute()
+        result = conn.execute().fetchone()
         self.count_all_pomodoro = result[0]
 
         sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `achieved`=1 and `start` LIKE %(today)s"
@@ -146,9 +145,8 @@ class PomodoroManagement:
             'today': str(datetime.datetime.today().strftime('%Y-%m-%d'))+"%"
         }
         conn = DBConnection(sql,params)
-        result = conn.execute()
+        result = conn.execute().fetchone()
         self.count_today_pomodoro = result[0]
-
 
 @bot.slash_command(name="start", description="タスクを開始します")
 async def start(ctx, task_name: Option(str, required=True, description="タスク名を入力してください")):
@@ -156,12 +154,13 @@ async def start(ctx, task_name: Option(str, required=True, description="タス�
         task_name = '無題のタスク'
     new_task = NewTask(task_name=task_name)
 
-    await ctx.respond(f'[{task_name}]を開始します')
+    await ctx.respond(f'**[{task_name}]**を開始します')
 
     global active_task
     active_task = new_task.task_id
 
-    await ctx.respond(f'[{new_task.task_name}]\n1個目のポモドーロです🍅\n🕐終了時刻:{new_task.end}')
+    end = new_task.end.strftime('%Y-%m-%d %H:%M')
+    await ctx.respond(f'**[{new_task.task_name}]**\n1個目のポモドーロです🍅\n> 🕐 終了時刻 : _{end}_')
 
 
 @bot.slash_command(name="finish", description="タスクを完了します")
@@ -173,7 +172,7 @@ async def finish(ctx):
         finished_task = ActivePomodoro(task_id=active_task)
         finished_task.achieved()
 
-        await ctx.respond(f'[{finished_task.task_name}]を完了させました！お疲れ様です！')
+        await ctx.respond(f'**[{finished_task.task_name}]**を完了させました！お疲れ様です！')
         del finished_task
         active_task = None
         interval_end = None
@@ -181,7 +180,7 @@ async def finish(ctx):
 @bot.slash_command(name="result", description="ポモドーロの獲得状況を確認します")
 async def result(ctx):
     result = PomodoroManagement()
-    await ctx.respond(f'**🍅ポモドーロ獲得状況🍅**\n総獲得数:{result.count_all_pomodoro}\n今日の獲得数:{result.count_today_pomodoro}')
+    await ctx.respond(f'**🍅ポモドーロ獲得状況🍅**\n>>> 総獲得数　　 : **{result.count_all_pomodoro}**ポモドーロ\n今日の獲得数 : **{result.count_today_pomodoro}**ポモドーロ')
 
 @tasks.loop(seconds=10)
 async def loop():
@@ -207,7 +206,8 @@ async def loop():
                 task.add()
                 pomodoro_count = task.get_total_pomodoro()
                 pomodoro_emoji = '🍅' * pomodoro_count
-                await channel.send(f'[{task.task_name}]\n{pomodoro_count}個目のポモドーロです{pomodoro_emoji}')
+                end = task.end.strftime('%Y-%m-%d %H:%M')
+                await channel.send(f'**[{task.task_name}]**\n{pomodoro_count}個目のポモドーロです{pomodoro_emoji}\n> 🕐 終了時刻 : _{end}_')
                 interval_end = None
 
 loop.start()
