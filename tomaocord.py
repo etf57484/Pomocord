@@ -4,10 +4,10 @@ from discord.ext import tasks
 import os, time, datetime, uuid
 from dotenv import load_dotenv
 
-# import pymysql.cursors
 import MySQLdb
-import configparser
 import os
+
+from notion_control import NotionEdit
 
 load_dotenv()
 
@@ -79,6 +79,8 @@ class ActivePomodoro:
         self.work_time = int(os.environ['WORK_TIME'])
         self.interval_time = int(os.environ['INTERVAL_TIME'])
 
+        self.notion = NotionEdit()
+
     def get_total_pomodoro(self):
         sql = "SELECT COUNT(`pomodoro_id`) FROM `tasks` WHERE `task_id`=%(task_id)s "
         params = {
@@ -89,25 +91,37 @@ class ActivePomodoro:
         return result[0]
 
     def add(self):
+        self.start = datetime.datetime.now()
+        self.end = datetime.datetime.now() + datetime.timedelta(minutes=self.work_time)
+
         sql = "INSERT INTO `tasks`(`task_id`,`task_name`,`start`,`end`) VALUES(%(task_id)s,%(task_name)s,%(start)s,%(end)s)"
         params = {
             'task_id': self.task_id,
             'task_name': self.task_name,
-            'start': datetime.datetime.now(),
-            'end': datetime.datetime.now() + datetime.timedelta(minutes=self.work_time)
+            'start': self.start,
+            'end': self.end
         }
         conn = DBConnection(sql,params)
         conn.execute()
         del conn
 
+        page_id = self.notion.get_id_from_task_id(self.task_id)
+        self.notion.update_pomodoro(page_id,self.end,self.get_total_pomodoro(),False)
+
     def achieved(self):
-        sql = "UPDATE `tasks` SET `achieved`=1 WHERE `pomodoro_id`=%(pomodoro_id)s"
+        self.end = datetime.datetime.now()
+
+        sql = "UPDATE `tasks` SET `end`=%(end)s, `achieved`=1 WHERE `pomodoro_id`=%(pomodoro_id)s"
         params = {
+            'end': self.end,
             'pomodoro_id': self.pomodoro_id
         }
         conn = DBConnection(sql,params)
         conn.execute()
         del conn
+
+        page_id = self.notion.get_id_from_task_id(self.task_id)
+        self.notion.update_pomodoro(page_id,self.end,self.get_total_pomodoro(),True)
 
 class NewTask:
     def __init__(self,task_name):
@@ -130,6 +144,9 @@ class NewTask:
         conn = DBConnection(sql,params)
         conn.execute()
         del conn
+
+        notion = NotionEdit()
+        notion.add_new_task(self.task_id, self.task_name, self.start, self.end, False, 1)
 
         active_task = self.task_id
 
@@ -154,14 +171,13 @@ async def start(ctx, task_name: Option(str, required=True, description="タス�
         task_name = '無題のタスク'
     new_task = NewTask(task_name=task_name)
 
-    await ctx.respond(f'**[{task_name}]**を開始します')
+    await ctx.respond(f'**[{task_name}]**を開始します。頑張りましょう！😊')
 
     global active_task
     active_task = new_task.task_id
 
     end = new_task.end.strftime('%Y-%m-%d %H:%M')
     await ctx.respond(f'**[{new_task.task_name}]**\n1個目のポモドーロです🍅\n> 🕐 終了時刻 : _{end}_')
-
 
 @bot.slash_command(name="finish", description="タスクを完了します")
 async def finish(ctx):
@@ -182,7 +198,7 @@ async def result(ctx):
     result = PomodoroManagement()
     await ctx.respond(f'**🍅ポモドーロ獲得状況🍅**\n>>> 総獲得数　　 : **{result.count_all_pomodoro}**ポモドーロ\n今日の獲得数 : **{result.count_today_pomodoro}**ポモドーロ')
 
-@tasks.loop(seconds=10)
+@tasks.loop(seconds=60)
 async def loop():
     # botが起動するまで待つ
     await bot.wait_until_ready()
@@ -196,13 +212,13 @@ async def loop():
         task = ActivePomodoro(task_id=active_task)
         if task.end.strftime('%Y-%m-%d %H:%M') == now:
             pomodoro_count = task.get_total_pomodoro()
-            await channel.send(f'{pomodoro_count}個目のポモドーロが終わりました！休憩しましょう！')
+            await channel.send(f'🙌 {pomodoro_count}個目のポモドーロが終わりました！休憩しましょう！☕')
             task.achieved()
 
             interval_end = datetime.datetime.now() + datetime.timedelta(minutes=int(os.environ['INTERVAL_TIME']))
         if interval_end is not None:
             if interval_end.strftime('%Y-%m-%d %H:%M') == now:
-                await channel.send(f'休憩終了！作業に戻りましょう！')
+                await channel.send(f'**休憩終了！**作業に戻りましょう！😥')
                 task.add()
                 pomodoro_count = task.get_total_pomodoro()
                 pomodoro_emoji = '🍅' * pomodoro_count
