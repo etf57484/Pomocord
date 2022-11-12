@@ -1,7 +1,7 @@
 import discord
 from discord import Option
 from discord.ext import tasks
-import os, time, datetime, uuid
+import os, datetime, uuid, asyncio
 from dotenv import load_dotenv
 
 import MySQLdb
@@ -123,6 +123,10 @@ class ActivePomodoro:
         page_id = self.notion.get_id_from_task_id(self.task_id)
         self.notion.update_pomodoro(page_id,self.end,self.get_total_pomodoro(),True)
 
+        pomodoro_management = PomodoroManagement()
+        pomodoro_management.update_pomodoro_count()
+
+
 class NewTask:
     def __init__(self,task_name):
         self.task_name = task_name
@@ -165,6 +169,10 @@ class PomodoroManagement:
         result = conn.execute().fetchone()
         self.count_today_pomodoro = result[0]
 
+    def update_pomodoro_count(self):
+        notion = NotionEdit()
+        notion.update_pomodoro_count(self.count_all_pomodoro,self.count_today_pomodoro)
+
 @bot.slash_command(name="start", description="タスクを開始します")
 async def start(ctx, task_name: Option(str, required=True, description="タスク名を入力してください")):
     if not task_name:
@@ -204,20 +212,24 @@ async def loop():
     await bot.wait_until_ready()
     channel = bot.get_channel(int(os.environ['CHANNEL_ID']))
 
+    now = datetime.datetime.now()
+    now_ymdhm = now.strftime('%Y-%m-%d %H:%M')
+    midnight = datetime.datetime(year=now.year, month=now.month, day=now.day, hour=23, minute=59)
+    midnight_ymdhm = midnight.strftime('%Y-%m-%d %H:%M')
+
     global active_task, interval_end
     print(f'active_task:{active_task}')
     if active_task is not None:
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
 
         task = ActivePomodoro(task_id=active_task)
-        if task.end.strftime('%Y-%m-%d %H:%M') == now:
+        if task.end.strftime('%Y-%m-%d %H:%M') == now_ymdhm:
             pomodoro_count = task.get_total_pomodoro()
             await channel.send(f'🙌 {pomodoro_count}個目のポモドーロが終わりました！休憩しましょう！☕')
             task.achieved()
 
             interval_end = datetime.datetime.now() + datetime.timedelta(minutes=int(os.environ['INTERVAL_TIME']))
         if interval_end is not None:
-            if interval_end.strftime('%Y-%m-%d %H:%M') == now:
+            if interval_end.strftime('%Y-%m-%d %H:%M') == now_ymdhm:
                 await channel.send(f'**休憩終了！**作業に戻りましょう！😥')
                 task.add()
                 pomodoro_count = task.get_total_pomodoro()
@@ -225,6 +237,15 @@ async def loop():
                 end = task.end.strftime('%Y-%m-%d %H:%M')
                 await channel.send(f'**[{task.task_name}]**\n{pomodoro_count}個目のポモドーロです{pomodoro_emoji}\n> 🕐 終了時刻 : _{end}_')
                 interval_end = None
+
+    if now_ymdhm == midnight_ymdhm:
+        result = PomodoroManagement()
+        await channel.send(f'**🍅ポモドーロ獲得状況🍅**\n>>> 総獲得数　　 : **{result.count_all_pomodoro}**ポモドーロ\n今日の獲得数 : **{result.count_today_pomodoro}**ポモドーロ')
+        
+        await asyncio.sleep(60)
+        
+        pomodoro_management = PomodoroManagement()
+        pomodoro_management.update_pomodoro_count()
 
 loop.start()
 bot.run(os.environ['API_KEY'])

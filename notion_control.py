@@ -10,6 +10,9 @@ class NotionEdit:
         self.notion_api = os.environ['NOTION_API']
         self.notion_db = os.environ['NOTION_DB']
 
+        self.notion_total_pomodoro_id = os.environ['NOTION_TOTAL_POMODORO_ID']
+        self.notion_today_pomodoro_id = os.environ['NOTION_TODAY_POMODORO_ID']
+
         self.notion = Client(auth=self.notion_api)
 
     def add_new_task(self, task_id, task_name, start, end, achieved, pomodoro):
@@ -73,10 +76,45 @@ class NotionEdit:
             }
         )
 
+    def update_pomodoro_count(self,notion_total_pomodoro,notion_today_pomodoro):
+        ret = self.notion.blocks.update(
+            **{
+                "block_id": self.notion_total_pomodoro_id,
+                "heading_3":{
+                    'rich_text': [
+                        {
+                            'text': {
+                                'content': is_multiple(notion_total_pomodoro,"pomodoro")
+                            }
+                        }
+                    ]
+                }
+            }
+        )
+
+        ret = self.notion.blocks.update(
+            **{
+                "block_id": self.notion_today_pomodoro_id,
+                "heading_3":{
+                    'rich_text': [
+                        {
+                            'text': {
+                                'content': is_multiple(notion_today_pomodoro,"pomodoro")
+                            }
+                        }
+                    ]
+                }
+            }
+        )
+
+
     def __del__(self):
         del self.notion
 
-# notionedit = NotionEdit()
-# notionedit.create_new_task(task_id="uuid-1234",task_name="tesuto",start="2022-11-05 11:15", end="2022-11-05 11:40", achieved=False, pomodoro=1)
-# page_id = notionedit.get_id_from_task_id(task_id="uuid-1234")
-# notionedit.update_pomodoro(page_id,10)
+def is_multiple(number, noun, nouns=None):
+    if nouns is None:
+        nouns = noun + "s"
+    if number > 1:
+        return str(number)+f" {nouns}"
+    else:
+        return str(number)+f" {noun}"
